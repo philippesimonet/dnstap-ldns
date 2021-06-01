@@ -215,15 +215,22 @@ print_dns_response_json(const ProtobufCBinaryData *message, FILE *fp)
 	status = ldns_wire2pkt(&pkt, message->data, message->len);
 	if (status == LDNS_STATUS_OK) {
 
-		for (i = 0; i < ldns_pkt_ancount(pkt); i++) {
-		    rr = ldns_rr_list_rr(ldns_pkt_answer(pkt), i);
-		    if (rr) {
-                str = ldns_rr2str(rr);
-                fprintf(fp, ",\"answer.%u\":", i);
-    			//fputs(",\"answer\":", fp);
-                print_json_string(str, strlen(str), fp);
-                free(str);
-		    }
+		if (ldns_pkt_ancount(pkt) > 0) {
+			fputs(",\"answers\":[", fp);
+			for (i = 0; i < ldns_pkt_ancount(pkt); i++) {
+				rr = ldns_rr_list_rr(ldns_pkt_answer(pkt), i);
+				if (rr) {
+					str = ldns_rr2str(rr);
+					//fprintf(fp, ",\"answer.%u\":", i);
+					//fputs(",\"answer\":", fp);
+					if (i > 0) {
+						fputs(",", fp);
+					}
+					print_json_string(str, strlen(str), fp);
+					free(str);
+				}
+			}
+			fputs("]", fp);
 		}
 
 	} else {

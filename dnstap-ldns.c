@@ -257,6 +257,10 @@ print_dns_question_json(const ProtobufCBinaryData *message, FILE *fp)
 	ldns_rr_class qclass = 0;
 	ldns_rr_type qtype = 0;
 	ldns_status status;
+	size_t len;
+	int i;
+	int dotcnt;
+	char *ld = NULL;
 
 	/* Parse the raw wire message. */
 	status = ldns_wire2pkt(&pkt, message->data, message->len);
@@ -277,8 +281,39 @@ print_dns_question_json(const ProtobufCBinaryData *message, FILE *fp)
 		/* Print the question name. */
 		str = ldns_rdf2str(qname);
 		if (str) {
+
+			/* drop last '.' */
+			len = strlen(str);
+			if (len > 0 && str[len-1] == '.') {
+				str[len-1] = '\0';
+				len--;
+			}
 			fputs(",\"query.name\":", fp);
-			print_json_string(str, strlen(str), fp);
+			print_json_string(str, len, fp);
+
+			/* l.d (if any) */
+
+			/* count number of dots */
+			dotcnt = 0;
+            i=0;
+		    while(str[i] != '\0') {
+		        if(str[i] == '.') {
+                    dotcnt++;
+                } else {
+                    str[i] = tolower(str[i]);
+                }
+                i++;
+            }
+
+			ld = str;
+			while (dotcnt >= 0) {
+				if (dotcnt < 3) {
+					fprintf(fp, ",\"query.l%ud\":", dotcnt+1);
+					print_json_string(ld, strlen(ld), fp);
+				}
+				ld = strchr(ld, '.') + 1;
+				dotcnt--;
+			}
 			free(str);
 		}
 
@@ -379,7 +414,7 @@ print_domain_name(const ProtobufCBinaryData *domain, FILE *fp)
 }
 
 static bool
-print_ip_address(const ProtobufCBinaryData *ip, FILE *fp)
+print_ip_address(const ProtobufCBinaryData *ip, FILE *fp, const bool do_quote)
 {
 	char buf[INET6_ADDRSTRLEN] = {0};
 
@@ -397,7 +432,13 @@ print_ip_address(const ProtobufCBinaryData *ip, FILE *fp)
 	}
 
 	/* Print the presentation form of the IP address. */
-	fputs(buf, fp);
+	if (do_quote) {
+		fputc('"', fp);
+		fputs(buf, fp);
+		fputc('"', fp);
+	} else {
+		fputs(buf, fp);
+	}
 
 	/* Success. */
 	return true;
@@ -460,6 +501,7 @@ print_dnstap_message_quiet(const Dnstap__Message *m, FILE *fp)
 	case DNSTAP__MESSAGE__TYPE__FORWARDER_QUERY:
 	case DNSTAP__MESSAGE__TYPE__STUB_QUERY:
 	case DNSTAP__MESSAGE__TYPE__TOOL_QUERY:
+	case DNSTAP__MESSAGE__TYPE__UPDATE_QUERY:
 		is_query = true;
 		break;
 	case DNSTAP__MESSAGE__TYPE__AUTH_RESPONSE:
@@ -468,11 +510,13 @@ print_dnstap_message_quiet(const Dnstap__Message *m, FILE *fp)
 	case DNSTAP__MESSAGE__TYPE__FORWARDER_RESPONSE:
 	case DNSTAP__MESSAGE__TYPE__STUB_RESPONSE:
 	case DNSTAP__MESSAGE__TYPE__TOOL_RESPONSE:
+	case DNSTAP__MESSAGE__TYPE__UPDATE_RESPONSE:
 		is_query = false;
 		break;
 	default:
-		fputs("[unhandled Dnstap.Message.Type]\n", fp);
-		return true;
+		fputs("[unhandled Dnstap.Message.Type]\n", stderr);
+		//fprintf(fp, "type =>  %04x \n", m->type);
+		return false;
 	}
 
 	/* Print timestamp. */
@@ -515,6 +559,10 @@ print_dnstap_message_quiet(const Dnstap__Message *m, FILE *fp)
 	case DNSTAP__MESSAGE__TYPE__TOOL_RESPONSE:
 		fputc('T', fp);
 		break;
+	case DNSTAP__MESSAGE__TYPE__UPDATE_QUERY:
+	case DNSTAP__MESSAGE__TYPE__UPDATE_RESPONSE:
+		fputc('U', fp);
+		break;
 	default:
 		fputc('?', fp);
 		break;
@@ -538,12 +586,12 @@ print_dnstap_message_quiet(const Dnstap__Message *m, FILE *fp)
 	}
 	if (print_query_address) {
 		if (m->has_query_address)
-			print_ip_address(&m->query_address, fp);
+			print_ip_address(&m->query_address, fp, false);
 		else
 			fputs("MISSING_ADDRESS", fp);
 	} else {
 		if (m->has_response_address)
-			print_ip_address(&m->response_address, fp);
+			print_ip_address(&m->response_address, fp, false);
 		else
 			fputs("MISSING_ADDRESS", fp);
 	}
@@ -647,14 +695,14 @@ print_dnstap_message_yaml(const Dnstap__Message *m, FILE *fp)
 	/* Print 'query_address' field. */
 	if (m->has_query_address) {
 		fputs("  query_address: ", fp);
-		print_ip_address(&m->query_address, fp);
+		print_ip_address(&m->query_address, fp, true);
 		fputc('\n', fp);
 	}
 
 	/* Print 'response_address field. */
 	if (m->has_response_address) {
 		fputs("  response_address: ", fp);
-		print_ip_address(&m->response_address, fp);
+		print_ip_address(&m->response_address, fp, true);
 		fputc('\n', fp);
 	}
 
@@ -700,6 +748,7 @@ isquery(const Dnstap__Message *m)
 	case DNSTAP__MESSAGE__TYPE__FORWARDER_QUERY:
 	case DNSTAP__MESSAGE__TYPE__STUB_QUERY:
 	case DNSTAP__MESSAGE__TYPE__TOOL_QUERY:
+	case DNSTAP__MESSAGE__TYPE__UPDATE_QUERY:
 		return true;
 		break;
 	case DNSTAP__MESSAGE__TYPE__AUTH_RESPONSE:
@@ -708,6 +757,7 @@ isquery(const Dnstap__Message *m)
 	case DNSTAP__MESSAGE__TYPE__FORWARDER_RESPONSE:
 	case DNSTAP__MESSAGE__TYPE__STUB_RESPONSE:
 	case DNSTAP__MESSAGE__TYPE__TOOL_RESPONSE:
+	case DNSTAP__MESSAGE__TYPE__UPDATE_RESPONSE:
 		return false;
 		break;
 	default:
@@ -772,14 +822,14 @@ print_dnstap_message_json(const Dnstap__Message *m, FILE *fp)
 	/* Print 'query_address' field. */
 	if (m->has_query_address) {
 		fputs(",\"query.ip\":\"", fp);
-		print_ip_address(&m->query_address, fp);
+		print_ip_address(&m->query_address, fp, false);
 		fputc('\"', fp);
 	}
 
 	/* Print 'response_address field. */
 	if (m->has_response_address) {
 		fputs(",\"response.ip\":\"", fp);
-		print_ip_address(&m->response_address, fp);
+		print_ip_address(&m->response_address, fp, false);
 		fputc('\"', fp);
 	}
 
@@ -821,7 +871,7 @@ print_dnstap_frame_quiet(const Dnstap__Dnstap *d, FILE *fp)
 	if (d->type == DNSTAP__DNSTAP__TYPE__MESSAGE && d->message != NULL) {
 		return print_dnstap_message_quiet(d->message, fp);
 	} else {
-		fputs("[unhandled Dnstap.Type]\n", fp);
+		fputs("[unhandled Dnstap.Type]\n", stderr);
 	}
 
 	/* Success. */
@@ -902,8 +952,10 @@ print_dnstap_frame_json(const Dnstap__Dnstap *d, FILE *fp)
 
 	/* Print 'message' field. */
 	if (d->type == DNSTAP__DNSTAP__TYPE__MESSAGE && d->message != NULL)	{
-		if (!print_dnstap_message_json(d->message, fp))
+		if (!print_dnstap_message_json(d->message, fp)) {
+			fprintf(fp, ",\"error\":\"unhandled message\"}\n");
 			return false;
+		}
 	}
 
 	fputs("}\n", fp);
@@ -1009,6 +1061,8 @@ usage(void)
 	fprintf(stderr, "  SR: STUB_RESPONSE\n");
 	fprintf(stderr, "  TQ: TOOL_QUERY\n");
 	fprintf(stderr, "  TR: TOOL_RESPONSE\n");
+	fprintf(stderr, "  UR: UPDATE_RESPONSE\n");
+	fprintf(stderr, "  UQ: UPDATE_QUERY\n");
 	fprintf(stderr, "\n");
 	exit(EXIT_FAILURE);
 }
@@ -1064,7 +1118,7 @@ read_input_frame_stream(const char *input_fname,
 			/* Data frame ready. */
 			if (!print_dnstap_frame(data, len_data, fmt, stdout)) {
 				fputs("Error: print_dnstap_frame() failed.\n", stderr);
-				goto out;
+				//goto out;
 			}
 		} else if (res == fstrm_res_stop) {
 			/* Normal end of data stream. */

@@ -165,6 +165,17 @@ message Message {
         // TOOL_RESPONSE is a DNS response message received by a DNS software
         // tool from a DNS server, from the perspective of the tool.
         TOOL_RESPONSE = 12;
+
+        // UPDATE_QUERY is a Dynamic DNS Update request (RFC 2136) received
+        // by an authoritative name server, from the perspective of the
+        // authoritative name server.
+        UPDATE_QUERY = 13;
+
+        // UPDATE_RESPONSE is a Dynamic DNS Update response (RFC 2136) sent
+        // from an authoritative name server, from the perspective of the
+        // authoritative name server.
+        UPDATE_RESPONSE = 14;
+        
     }
 
     // One of the Type values described above.
